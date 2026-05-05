@@ -4,6 +4,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from enum import Enum
 
 
 def new_id() -> str:
@@ -27,18 +28,11 @@ class Goal:
 
 
 @dataclass
-class Observation:
-    summary: str
-    data: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
 class ActionRequest:
     tool: str
     operation: str
     params: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
-
 
 @dataclass
 class ActionResult:
@@ -50,6 +44,34 @@ class ActionResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+class PermissionLevel(str, Enum):
+    SAFE = "SAFE"
+    LIMITED = "LIMITED"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+@dataclass
+class State:
+    goal: Goal | None = None
+    plan: list[str] = field(default_factory=list)
+    last_action: ActionRequest | None = None
+    last_result: ActionResult | None = None
+    blockers: list[str] = field(default_factory=list)
+
+@dataclass
+class Experience:
+    lesson: str
+    context: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+@dataclass
+class Observation:
+    summary: str
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
