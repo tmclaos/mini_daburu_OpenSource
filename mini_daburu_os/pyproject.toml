@@ -1,0 +1,14 @@
+[project]
+name = "mini-daburu-os"
+version = "0.1.0"
+description = "A minimal Agent OS inspired by DaburuChan"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.44"]
+dev = ["pytest>=7.4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

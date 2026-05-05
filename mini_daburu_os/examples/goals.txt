@@ -1,0 +1,4 @@
+create account on vercel.com using test@example.com
+deploy ./demo-app to vercel
+check uptime for https://example.com
+record revenue 25
