@@ -5,7 +5,7 @@ from pathlib import Path
 
 from agent_os.loop import AgentOS
 from agent_os.memory import JsonlMemory
-from agent_os.schemas import ActionResult, Goal
+from agent_os.schemas import ActionResult, Goal, AgentState
 from agent_os.verifier import Verifier
 
 
@@ -35,8 +35,10 @@ class MiniDaburuTests(unittest.TestCase):
     def test_verifier_success_and_checkpoint(self):
         verifier = Verifier()
         goal = Goal("test")
-        ok = verifier.verify(goal, [ActionResult(True)])
-        blocked = verifier.verify(goal, [ActionResult(False, requires_human=True, checkpoint="captcha")])
+        state1 = AgentState(goal="test")
+        ok = verifier.verify(goal, state1, [ActionResult(True)])
+        state2 = AgentState(goal="test")
+        blocked = verifier.verify(goal, state2, [ActionResult(False, requires_human=True, checkpoint="captcha")])
         self.assertTrue(ok.success)
         self.assertFalse(blocked.success)
         self.assertEqual(blocked.evidence["checkpoints"], ["captcha"])
