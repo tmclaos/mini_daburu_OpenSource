@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_os.memory import JsonlMemory
+from agent_os.memory.jsonl_memory import JsonlMemory, ReflectionMemory
+from agent_os.learning.reflection import ReflectionGenerator
+from agent_os.improvement.proposer import ImprovementProposer
+from agent_os.experiment.sandbox import ExperimentRunner
+from agent_os.evolution.evaluator import EvolutionEvaluator
+from agent_os.evolution.versioning import VersioningManager
 from agent_os.planner import Planner
 from agent_os.schemas import Episode, Goal, Observation
 from agent_os.skills import DEFAULT_SKILLS
@@ -25,6 +30,12 @@ class AgentOS:
         self.workspace = Path(workspace).resolve()
         self.data_dir = Path(data_dir)
         self.memory = JsonlMemory(str(self.data_dir / "episodes.jsonl"))
+        self.reflection_memory = ReflectionMemory(str(self.data_dir / "reflections.jsonl"))
+        self.reflection_generator = ReflectionGenerator()
+        self.proposer = ImprovementProposer()
+        self.experiment_runner = ExperimentRunner(str(self.workspace))
+        self.evaluator = EvolutionEvaluator()
+        self.versioning = VersioningManager(str(self.workspace))
         self.vault = VaultTool(str(self.data_dir / "vault.json"))
         self.tools = ToolRegistry()
         self.tools.register(FileTool(str(self.workspace)))
@@ -56,6 +67,30 @@ class AgentOS:
         record = episode.to_dict()
         record["skill"] = skill_name
         self.memory.append(record)
+
+        reflection = self.reflection_generator.generate(episode)
+        reflection["episode_id"] = record["goal"].get("goal_id", "")
+        self.reflection_memory.append(reflection)
+
+        proposal = self.proposer.propose(reflection)
+        if proposal and proposal.get("type") == "skill":
+            target_skill = proposal.get("target")
+            # For this simple prototype, try to find a file matching the target
+            target_file_path = f"agent_os/skills/{target_skill}.py"
+            # Fallback to base.py if we don't have a matching skill for simulation
+            if not (self.workspace / target_file_path).exists():
+                 target_file_path = "agent_os/skills/base.py"
+
+            test_results = self.experiment_runner.run_experiment(proposal, target_file_path)
+
+            # Simulated old metrics
+            old_metrics = {"success_rate": 0.5, "steps_taken": len(episode.actions)}
+
+            if self.evaluator.evaluate(old_metrics, test_results):
+                 modified_file = test_results.get("modified_file")
+                 if modified_file:
+                     self.versioning.promote(modified_file, Path(target_file_path).name)
+
         return record
 
     def observe(self, goal: Goal) -> Observation:
