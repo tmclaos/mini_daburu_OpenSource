@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import json
 from pathlib import Path
 
 from agent_os.memory.jsonl_memory import JsonlMemory, ReflectionMemory
@@ -9,7 +11,7 @@ from agent_os.experiment.sandbox import ExperimentRunner
 from agent_os.evolution.evaluator import EvolutionEvaluator
 from agent_os.evolution.versioning import VersioningManager
 from agent_os.planner import Planner
-from agent_os.schemas import Episode, Goal, Observation
+from agent_os.schemas import Episode, Goal, Observation, AgentState
 from agent_os.skills import DEFAULT_SKILLS
 from agent_os.tools.browser import BrowserTool
 from agent_os.tools.deploy import DeployTool
@@ -30,12 +32,21 @@ class AgentOS:
         self.workspace = Path(workspace).resolve()
         self.data_dir = Path(data_dir)
         self.memory = JsonlMemory(str(self.data_dir / "episodes.jsonl"))
+feat/self-improvement-loop-17471436730359095752
         self.reflection_memory = ReflectionMemory(str(self.data_dir / "reflections.jsonl"))
         self.reflection_generator = ReflectionGenerator()
         self.proposer = ImprovementProposer()
         self.experiment_runner = ExperimentRunner(str(self.workspace))
         self.evaluator = EvolutionEvaluator()
         self.versioning = VersioningManager(str(self.workspace))
+
+        self.logs_dir = Path("agent_os/logs")
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.skills_dir = self.data_dir / "skills"
+        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        now = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        self.log_file = self.logs_dir / f"run_{now}.jsonl"
+main
         self.vault = VaultTool(str(self.data_dir / "vault.json"))
         self.tools = ToolRegistry()
         self.tools.register(FileTool(str(self.workspace)))
@@ -52,17 +63,52 @@ class AgentOS:
     async def run_goal(self, description: str, **metadata) -> dict:
         goal = Goal(description=description, metadata=metadata)
         observation = self.observe(goal)
-        skill_name, actions = self.planner.plan(goal, observation)
+
+        saved_skill = self.find_similar_skill(description)
+        if saved_skill:
+            skill_name = "reused_skill"
+            from agent_os.schemas import ActionRequest
+            actions = [ActionRequest(**a) if isinstance(a, dict) else a for a in saved_skill.get("steps", [])]
+        else:
+            skill_name, actions = self.planner.plan(goal, observation)
+
+        state = AgentState(goal=description, plan=actions)
         results = []
-        for action in actions:
+        for i, action in enumerate(actions):
+            state.current_step = i + 1
+            state.last_action = action
             result = await self.tools.run(action)
+            state.last_result = result
             results.append(result)
+
+            log_entry = {
+                "step": i + 1,
+                "goal": description,
+                "plan_step": action.reason,
+                "action": f"{action.tool}.{action.operation}",
+                "input": action.params,
+                "result": result.output if result.success else result.error,
+                "success": result.success,
+                "next_decision": "stop" if (result.requires_human or not result.success) else "continue"
+            }
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, default=str) + "\n")
+
             if result.requires_human:
                 break
             if not result.success:
                 break
-        verification = self.verifier.verify(goal, results)
+        state.blocked = any(not r.success for r in results) or any(r.requires_human for r in results)
+        verification = self.verifier.verify(goal, state, results)
         goal.status = "completed" if verification.success else "blocked"
+
+        if verification.success and not saved_skill:
+            self.save_skill({
+                "goal": description,
+                "steps": [a.__dict__ if hasattr(a, '__dict__') else a for a in actions],
+                "tools_used": list(set(a.tool for a in actions))
+            })
+
         episode = Episode(goal, observation, actions, results, verification)
         record = episode.to_dict()
         record["skill"] = skill_name
@@ -99,3 +145,31 @@ class AgentOS:
             summary=f"Goal received. Found {len(related)} related memory records.",
             data={"related_memory": related, "tools": self.tools.names()},
         )
+
+
+    def find_similar_skill(self, goal_desc: str) -> dict | None:
+        if not self.skills_dir.exists():
+            return None
+        needle = set(goal_desc.lower().split())
+        best_skill = None
+        best_score = 0.0
+        for skill_file in self.skills_dir.glob("*.json"):
+            try:
+                skill_data = json.loads(skill_file.read_text(encoding="utf-8"))
+                saved_goal = set(skill_data.get("goal", "").lower().split())
+                if not saved_goal:
+                    continue
+                score = len(needle.intersection(saved_goal)) / len(saved_goal)
+                if score > 0.7 and score > best_score:
+                    best_score = score
+                    best_skill = skill_data
+            except Exception:
+                continue
+        return best_skill
+
+    def save_skill(self, skill_data: dict) -> None:
+        import uuid
+        skill_id = str(uuid.uuid4())[:8]
+        file_path = self.skills_dir / f"skill_{skill_id}.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(skill_data, f, indent=2)
