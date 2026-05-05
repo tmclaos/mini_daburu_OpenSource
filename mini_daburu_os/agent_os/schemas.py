@@ -77,3 +77,13 @@ class Episode:
             "verification": asdict(self.verification),
             "created_at": self.created_at,
         }
+
+
+@dataclass
+class AgentState:
+    goal: str
+    current_step: int | None = None
+    last_action: ActionRequest | None = None
+    last_result: ActionResult | None = None
+    plan: list[ActionRequest] = field(default_factory=list)
+    blocked: bool = False
