@@ -32,3 +32,10 @@ class JsonlMemory:
             if len(hits) >= limit:
                 break
         return hits
+
+
+class ReflectionMemory(JsonlMemory):
+    """Tiny append-only memory store for reflections."""
+
+    def __init__(self, path: str = "data/reflections.jsonl") -> None:
+        super().__init__(path)
